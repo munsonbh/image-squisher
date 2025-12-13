@@ -1,0 +1,3 @@
+Pillow>=10.0.0
+# pillow-heif is macOS-only (HEIC support)
+# Install manually on macOS: pip install pillow-heif>=0.13.0

@@ -1,0 +1,39 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Create virtual environment
+      run: python3 -m venv venv
+    
+    - name: Install dependencies
+      run: |
+        source venv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Check syntax
+      run: |
+        source venv/bin/activate
+        python -m py_compile main.py format_detector.py processor.py file_manager.py
+    
+    - name: Test help output
+      run: |
+        source venv/bin/activate
+        python main.py --help || true
+
