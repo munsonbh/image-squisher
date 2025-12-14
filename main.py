@@ -4,6 +4,7 @@
 import argparse
 import sys
 import subprocess
+import shutil
 import logging
 import time
 import platform
