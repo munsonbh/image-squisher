@@ -266,7 +266,10 @@ def main():
                 success, format_kept, original_size, final_size = process_image(image_path)
                 result_queue.put((index, image_path, success, format_kept, original_size, final_size, None))
             except Exception as e:
+                # Log exception with full traceback here where exception context exists
                 error_msg = f"Exception processing {image_path.name}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                logger.error(f"Error in folder: {image_path.parent}")
                 result_queue.put((index, image_path, False, 'original', 0, 0, error_msg))
             finally:
                 image_queue.task_done()
@@ -321,8 +324,9 @@ def main():
             else:
                 errors += 1
                 if error_msg:
-                    logger.error(error_msg, exc_info=True)
-                    logger.error(f"Error in folder: {image_path.parent}")
+                    # Exception was already logged with traceback in worker thread
+                    # Just log the error message here (no exc_info since we're outside exception context)
+                    logger.error(error_msg)
                     send_notification(
                         'Image Squisher - Error',
                         f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
