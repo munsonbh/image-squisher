@@ -8,8 +8,10 @@ import shutil
 import logging
 import time
 import platform
+import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
+from queue import Queue
 
 from format_detector import scan_folder, detect_formats
 from file_manager import process_image
@@ -167,6 +169,12 @@ def main():
         action='store_true',
         help='Only process top-level folder (disable recursive scanning)'
     )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=None,
+        help='Number of parallel workers (default: number of CPU cores)'
+    )
     
     args = parser.parse_args()
     
@@ -222,7 +230,18 @@ def main():
         print(f"✓ JPEG XL support available (using {cjxl_path})")
     print()
     
-    # Process each image
+    # Determine number of workers
+    import multiprocessing
+    num_workers = args.workers if args.workers else min(multiprocessing.cpu_count(), len(image_files))
+    if num_workers < 1:
+        num_workers = 1
+    if num_workers > len(image_files):
+        num_workers = len(image_files)
+    
+    print(f"Using {num_workers} parallel worker(s)")
+    print()
+    
+    # Process images in parallel
     total_original = 0
     total_final = 0
     results = {'original': 0, 'jxl': 0, 'webp': 0}
@@ -231,35 +250,64 @@ def main():
     last_progress_time = time.time()
     hang_timeout = 300  # 5 minutes without progress = potential hang
     
-    for i, image_path in enumerate(image_files, 1):
-        current_time = time.time()
-        
-        # Check for potential hang (no progress for hang_timeout seconds)
-        if current_time - last_progress_time > hang_timeout:
-            error_msg = f"Potential hang detected! Last processed: {image_files[i-2].name if i > 1 else 'none'}"
-            logger.error(error_msg)
-            logger.error(f"Current folder: {image_path.parent}")
-            logger.error(f"Stuck on file: {image_path.name}")
-            send_notification(
-                'Image Squisher - Hang Detected',
-                f"Script may be hung processing:\n{image_path.parent}\n\nFile: {image_path.name}",
-                'Basso'
-            )
-            print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
-            print(f"   Current folder: {image_path.parent}")
-            print(f"   Stuck on file: {image_path.name}")
-            # Continue processing but log the issue
-        
-        print(f"[{i}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
-        
-        try:
-            process_start = time.time()
-            success, format_kept, original_size, final_size = process_image(image_path)
-            process_duration = time.time() - process_start
+    # Thread-safe counters and locks
+    results_lock = threading.Lock()
+    completed_count = [0]  # Use list for mutable reference
+    
+    def process_worker(image_queue: Queue, result_queue: Queue):
+        """Worker thread that processes images from the queue."""
+        while True:
+            item = image_queue.get()
+            if item is None:  # Poison pill
+                break
             
-            # Update last progress time
+            index, image_path = item
+            try:
+                success, format_kept, original_size, final_size = process_image(image_path)
+                result_queue.put((index, image_path, success, format_kept, original_size, final_size, None))
+            except Exception as e:
+                error_msg = f"Exception processing {image_path.name}: {str(e)}"
+                result_queue.put((index, image_path, False, 'original', 0, 0, error_msg))
+            finally:
+                image_queue.task_done()
+    
+    if num_workers > 1:
+        # Use threading for parallel processing
+        image_queue = Queue()
+        result_queue = Queue()
+        
+        # Start worker threads
+        workers = []
+        for _ in range(num_workers):
+            worker = threading.Thread(target=process_worker, args=(image_queue, result_queue))
+            worker.daemon = True
+            worker.start()
+            workers.append(worker)
+        
+        # Add all images to queue
+        for i, image_path in enumerate(image_files):
+            image_queue.put((i, image_path))
+        
+        # Collect results as they complete
+        results_dict = {}
+        while len(results_dict) < len(image_files):
+            index, image_path, success, format_kept, original_size, final_size, error_msg = result_queue.get()
+            results_dict[index] = (image_path, success, format_kept, original_size, final_size, error_msg)
+            completed_count[0] += 1
             last_progress_time = time.time()
         
+        # Stop workers
+        for _ in range(num_workers):
+            image_queue.put(None)
+        for worker in workers:
+            worker.join()
+        
+        # Process results in order
+        for i in range(len(image_files)):
+            image_path, success, format_kept, original_size, final_size, error_msg = results_dict[i]
+            
+            print(f"[{i+1}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
+            
             if success:
                 total_original += original_size
                 total_final += final_size
@@ -272,21 +320,75 @@ def main():
                       f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
             else:
                 errors += 1
-                logger.warning(f"Failed to process {image_path.name}, kept original")
+                if error_msg:
+                    logger.error(error_msg, exc_info=True)
+                    logger.error(f"Error in folder: {image_path.parent}")
+                    send_notification(
+                        'Image Squisher - Error',
+                        f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
+                        'Basso'
+                    )
+                else:
+                    logger.warning(f"Failed to process {image_path.name}, kept original")
                 print(f"ERROR (kept original)")
-        except Exception as e:
-            errors += 1
-            error_msg = f"Exception processing {image_path.name}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            logger.error(f"Error in folder: {image_path.parent}")
-            print(f"ERROR (kept original)")
+    else:
+        # Single-threaded processing (original behavior)
+        for i, image_path in enumerate(image_files, 1):
+            current_time = time.time()
             
-            # Send notification for exceptions
-            send_notification(
-                'Image Squisher - Error',
-                f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
-                'Basso'
-            )
+            # Check for potential hang (no progress for hang_timeout seconds)
+            if current_time - last_progress_time > hang_timeout:
+                error_msg = f"Potential hang detected! Last processed: {image_files[i-2].name if i > 1 else 'none'}"
+                logger.error(error_msg)
+                logger.error(f"Current folder: {image_path.parent}")
+                logger.error(f"Stuck on file: {image_path.name}")
+                send_notification(
+                    'Image Squisher - Hang Detected',
+                    f"Script may be hung processing:\n{image_path.parent}\n\nFile: {image_path.name}",
+                    'Basso'
+                )
+                print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
+                print(f"   Current folder: {image_path.parent}")
+                print(f"   Stuck on file: {image_path.name}")
+                # Continue processing but log the issue
+            
+            print(f"[{i}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
+            
+            try:
+                process_start = time.time()
+                success, format_kept, original_size, final_size = process_image(image_path)
+                process_duration = time.time() - process_start
+                
+                # Update last progress time
+                last_progress_time = time.time()
+            
+                if success:
+                    total_original += original_size
+                    total_final += final_size
+                    results[format_kept] += 1
+                    
+                    savings = original_size - final_size
+                    savings_pct = (savings / original_size * 100) if original_size > 0 else 0
+                    
+                    print(f"{format_kept.upper()} kept ({format_bytes(original_size)} → {format_bytes(final_size)}, "
+                          f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
+                else:
+                    errors += 1
+                    logger.warning(f"Failed to process {image_path.name}, kept original")
+                    print(f"ERROR (kept original)")
+            except Exception as e:
+                errors += 1
+                error_msg = f"Exception processing {image_path.name}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                logger.error(f"Error in folder: {image_path.parent}")
+                print(f"ERROR (kept original)")
+                
+                # Send notification for exceptions
+                send_notification(
+                    'Image Squisher - Error',
+                    f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
+                    'Basso'
+                )
     
     total_duration = time.time() - start_time
     

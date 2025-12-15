@@ -166,10 +166,19 @@ Process only top-level folder:
 python main.py /path/to/images --no-recursive
 ```
 
+Process with custom number of parallel workers (default: number of CPU cores):
+```bash
+python main.py /path/to/images --workers 4
+```
+
 ### Features
 
 - **Automatic format detection**: Scans and reports all image formats found
 - **Smart compression**: Only keeps converted files if they're at least 5% smaller
+- **Parallel processing**: Processes multiple images concurrently (default: number of CPU cores)
+- **Parallel conversions**: Converts to JPEG XL and WebP simultaneously for each image
+- **Optimized compression**: Uses balanced compression settings for faster processing
+- **Skip optimized files**: Automatically skips files already in JXL or WebP format
 - **Progress tracking**: Real-time progress with file-by-file updates
 - **Hang detection**: Automatically detects if processing stalls (5+ minutes)
 - **Error notifications**: macOS notifications for errors and hangs (requires terminal-notifier)
@@ -178,14 +187,21 @@ python main.py /path/to/images --no-recursive
 ## How It Works
 
 1. **Scans** the specified folder for image files (recursively by default)
-2. **For each image:**
-   - Converts to JPEG XL (lossless, highest compression) - if available
-   - Converts to WebP (lossless, highest compression)
+2. **For each image (processed in parallel):**
+   - Skips files already in JXL or WebP format
+   - Converts to JPEG XL and WebP **simultaneously** (lossless, optimized compression) - if available
    - Compares file sizes of original, JPEG XL, and WebP
    - **Only keeps converted file if it's at least 5% smaller** (preserves originals for minimal gains)
    - Deletes temporary files
 3. **Reports** detailed statistics on compression results
 4. **Logs** all activity to `image-squisher.log` for troubleshooting
+
+### Performance Optimizations
+
+- **Parallel image processing**: Multiple images processed concurrently (default: CPU core count)
+- **Parallel format conversion**: JPEG XL and WebP conversions run simultaneously for each image
+- **Optimized compression settings**: Uses effort level 7 for JPEG XL and method 4 for WebP (faster than maximum with minimal size difference)
+- **Smart skipping**: Automatically skips files already in optimized formats
 
 ### Special Handling
 
