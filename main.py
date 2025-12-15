@@ -11,7 +11,7 @@ import platform
 import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
-from queue import Queue
+from queue import Queue, Empty
 
 from format_detector import scan_folder, detect_formats
 from file_manager import process_image
@@ -291,13 +291,54 @@ def main():
         for i, image_path in enumerate(image_files):
             image_queue.put((i, image_path))
         
-        # Collect results as they complete
+        # Collect results as they complete with hang detection
         results_dict = {}
+        hang_check_interval = 60  # Check for hangs every 60 seconds
+        last_hang_check = time.time()
+        
         while len(results_dict) < len(image_files):
-            index, image_path, success, format_kept, original_size, final_size, error_msg = result_queue.get()
-            results_dict[index] = (image_path, success, format_kept, original_size, final_size, error_msg)
-            completed_count[0] += 1
-            last_progress_time = time.time()
+            try:
+                # Use timeout to periodically check for hangs
+                timeout = min(hang_timeout, hang_check_interval)
+                index, image_path, success, format_kept, original_size, final_size, error_msg = result_queue.get(timeout=timeout)
+                results_dict[index] = (image_path, success, format_kept, original_size, final_size, error_msg)
+                completed_count[0] += 1
+                last_progress_time = time.time()
+                last_hang_check = time.time()
+            except Empty:
+                # Timeout occurred - check for potential hang
+                current_time = time.time()
+                time_since_progress = current_time - last_progress_time
+                
+                if time_since_progress > hang_timeout:
+                    # Potential hang detected
+                    # Find which images are still being processed
+                    processed_indices = set(results_dict.keys())
+                    remaining_indices = [i for i in range(len(image_files)) if i not in processed_indices]
+                    
+                    if remaining_indices:
+                        # Report the first remaining image as potentially stuck
+                        stuck_index = remaining_indices[0]
+                        stuck_image = image_files[stuck_index]
+                        error_msg = f"Potential hang detected! No progress for {time_since_progress:.0f} seconds"
+                        logger.error(error_msg)
+                        logger.error(f"Current folder: {stuck_image.parent}")
+                        logger.error(f"Stuck on file: {stuck_image.name}")
+                        logger.error(f"Remaining images: {len(remaining_indices)}")
+                        send_notification(
+                            'Image Squisher - Hang Detected',
+                            f"Script may be hung processing:\n{stuck_image.parent}\n\nFile: {stuck_image.name}\n\nNo progress for {time_since_progress:.0f}s",
+                            'Basso'
+                        )
+                        print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
+                        print(f"   Current folder: {stuck_image.parent}")
+                        print(f"   Stuck on file: {stuck_image.name}")
+                        print(f"   No progress for {time_since_progress:.0f} seconds")
+                        # Reset last_progress_time to avoid spamming notifications
+                        last_progress_time = current_time
+                
+                # Continue waiting for results
+                continue
         
         # Stop workers
         for _ in range(num_workers):
