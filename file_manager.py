@@ -4,6 +4,15 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+# Experimental: Format learning (optional, graceful degradation)
+try:
+    from format_learner import FormatLearner
+    _learner = FormatLearner()  # Global learner instance
+    LEARNING_ENABLED = True
+except ImportError:
+    LEARNING_ENABLED = False
+    _learner = None
+
 
 def get_file_size(filepath: Path) -> int:
     """Get file size in bytes."""
@@ -216,6 +225,20 @@ def process_image(image_path: Path) -> Tuple[bool, str, int, int]:
             cleanup_temp_files(jxl_path, webp_path)
         
         final_size = get_file_size(final_path)
+        
+        # Experimental: Record result for learning (non-blocking, fails gracefully)
+        if LEARNING_ENABLED and _learner:
+            try:
+                _learner.record_result(
+                    image_path=image_path,
+                    winner=format_name,
+                    original_size=original_size,
+                    jxl_size=jxl_size,
+                    webp_size=webp_size
+                )
+            except Exception:
+                # Don't fail if learning fails
+                pass
         
         return True, format_name, original_size, final_size
     

@@ -1,3 +1,8 @@
 Pillow>=10.0.0
 # pillow-heif is macOS-only (HEIC support)
 # Install manually on macOS: pip install pillow-heif>=0.13.0
+
+# Experimental: Vision analysis and format learning (optional)
+numpy>=1.20.0
+# scikit-learn is optional but recommended for better color complexity analysis
+# Install with: pip install scikit-learn>=1.0.0

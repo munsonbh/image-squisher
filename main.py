@@ -476,6 +476,19 @@ def main():
             'Ping'
         )
     
+    # Experimental: Show learning statistics if available
+    try:
+        from file_manager import _learner, LEARNING_ENABLED
+        if LEARNING_ENABLED and _learner and _learner.stats['total_processed'] > 0:
+            print()
+            print("=" * 60)
+            print("Experimental: Format Learning Statistics")
+            print(_learner.get_statistics_summary())
+            _learner.save_stats()  # Final save
+    except Exception:
+        # Don't fail if learning display fails
+        pass
+    
     print(f"\nLog file: image-squisher.log")
 
 
