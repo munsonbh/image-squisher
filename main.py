@@ -484,10 +484,35 @@ def main():
             print("=" * 60)
             print("Experimental: Format Learning Statistics")
             print(_learner.get_statistics_summary())
+            
+            # Generate and save detailed report
+            detailed_report = _learner.generate_detailed_report()
+            report_file = Path('format-learning-report.txt')
+            try:
+                with open(report_file, 'w') as f:
+                    f.write(detailed_report)
+                print(f"\nDetailed report saved to: {report_file}")
+                print("(Includes specificity, sensitivity, precision, and F1 scores for each feature)")
+            except Exception:
+                pass
+            
+            # Show a preview of the detailed report
+            print("\n" + "=" * 60)
+            print("Detailed Report Preview:")
+            print("=" * 60)
+            report_lines = detailed_report.split('\n')
+            # Show first 30 lines as preview
+            preview_lines = report_lines[:30]
+            print('\n'.join(preview_lines))
+            if len(report_lines) > 30:
+                print(f"\n... ({len(report_lines) - 30} more lines in {report_file})")
+            
             _learner.save_stats()  # Final save
-    except Exception:
+    except Exception as e:
         # Don't fail if learning display fails
-        pass
+        import traceback
+        logger.warning(f"Learning report generation failed: {e}")
+        logger.debug(traceback.format_exc())
     
     print(f"\nLog file: image-squisher.log")
 
