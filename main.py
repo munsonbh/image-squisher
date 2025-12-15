@@ -182,8 +182,6 @@ def main():
     
     # Set up logging
     logger = setup_logging()
-    logger.info(f"Starting image compression for folder: {folder_path}")
-    logger.info(f"Recursive mode: {not args.no_recursive}")
     
     print(f"Scanning folder: {folder_path}")
     recursive = not args.no_recursive
@@ -194,9 +192,7 @@ def main():
     print()
     
     # Scan for images
-    logger.info("Scanning for image files...")
     image_files = scan_folder(folder_path, recursive=recursive)
-    logger.info(f"Found {len(image_files)} image file(s)")
     
     if not image_files:
         print("No image files found.")
@@ -255,7 +251,6 @@ def main():
             # Continue processing but log the issue
         
         print(f"[{i}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
-        logger.info(f"Processing [{i}/{len(image_files)}]: {image_path} (folder: {image_path.parent})")
         
         try:
             process_start = time.time()
@@ -264,8 +259,6 @@ def main():
             
             # Update last progress time
             last_progress_time = time.time()
-            
-            logger.info(f"Completed {image_path.name}: {format_kept} kept, {process_duration:.2f}s")
         
             if success:
                 total_original += original_size
