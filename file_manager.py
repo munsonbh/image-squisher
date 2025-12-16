@@ -168,11 +168,19 @@ def process_image(image_path: Path, min_improvement_pct: Optional[float] = None)
     # Animated GIFs are now handled by convert_to_webp (converts to animated WebP)
     # JPEG XL doesn't support animation, so it will return None for animated GIFs
     
+    # Skip files already in optimized formats (JXL or WebP)
+    suffix_lower = image_path.suffix.lower()
+    if suffix_lower in ('.jxl', '.webp'):
+        # Already optimized, skip processing
+        original_size = get_file_size(image_path)
+        format_name = 'jxl' if suffix_lower == '.jxl' else 'webp'
+        return True, format_name, original_size, original_size
+    
     original_size = get_file_size(image_path)
     temp_dir = image_path.parent
     
-    # Convert to both formats
-    jxl_path, webp_path, jxl_size, webp_size = convert_image(image_path, temp_dir)
+    # Convert to both formats (in parallel)
+    jxl_path, webp_path, jxl_size, webp_size = convert_image(image_path, temp_dir, original_size)
     
     try:
         # Compare and determine which to keep

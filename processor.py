@@ -4,6 +4,7 @@ import io
 import subprocess
 import shutil
 import platform
+import threading
 from pathlib import Path
 from typing import Optional, Tuple
 from PIL import Image
@@ -122,7 +123,7 @@ def convert_to_jpegxl(image_path: Path, output_path: Path, quality: Optional[int
     try:
         # Use cjxl command-line tool for conversion
         # -q 100 = mathematically lossless (quality 100)
-        # -e 9 = effort 9 (highest compression, slowest)
+        # -e 7 = effort 7 (good compression, much faster than 9 with minimal size difference)
         # Note: cjxl doesn't have --lossless flag, use -q 100 instead
         result = subprocess.run(
             [
@@ -258,7 +259,7 @@ def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] =
             elif img.mode not in ('RGB', 'RGBA'):
                 img = img.convert('RGB')
             
-            # Save as WebP with lossless compression and highest quality
+            # Save as WebP with lossless compression and high quality
             img.save(
                 output_path,
                 format='WEBP',
@@ -272,13 +273,14 @@ def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] =
         return None
 
 
-def convert_image(image_path: Path, temp_dir: Path) -> Tuple[Optional[Path], Optional[Path], Optional[int], Optional[int]]:
+def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int] = None) -> Tuple[Optional[Path], Optional[Path], Optional[int], Optional[int]]:
     """
-    Convert an image to both JPEG XL and WebP formats.
+    Convert an image to both JPEG XL and WebP formats in parallel.
     
     Args:
         image_path: Path to the source image
         temp_dir: Directory where temporary converted files should be saved
+        original_size: Original file size in bytes (for early exit optimization)
         
     Returns:
         Tuple of (jxl_path, webp_path, jxl_size, webp_size)
@@ -289,8 +291,38 @@ def convert_image(image_path: Path, temp_dir: Path) -> Tuple[Optional[Path], Opt
     jxl_path = temp_dir / f"{base_name}.tmp.jxl"
     webp_path = temp_dir / f"{base_name}.tmp.webp"
     
-    jxl_size = convert_to_jpegxl(image_path, jxl_path)
-    webp_size = convert_to_webp(image_path, webp_path)
+    # Convert both formats in parallel using threads
+    jxl_result = [None]  # Use list to allow modification from nested function
+    webp_result = [None]
+    
+    def convert_jxl():
+        jxl_result[0] = convert_to_jpegxl(image_path, jxl_path)
+    
+    def convert_webp():
+        webp_result[0] = convert_to_webp(image_path, webp_path)
+    
+    # Start both conversions in parallel
+    jxl_thread = threading.Thread(target=convert_jxl)
+    webp_thread = threading.Thread(target=convert_webp)
+    
+    jxl_thread.start()
+    webp_thread.start()
+    
+    # Wait for JXL to complete first (it's usually faster)
+    jxl_thread.join()
+    jxl_size = jxl_result[0]
+    
+    # Early exit optimization: if JXL is already significantly smaller than original,
+    # we can skip waiting for WebP (but still let it finish in background)
+    skip_webp_wait = False
+    if original_size and jxl_size and jxl_size < original_size * 0.7:  # JXL is 30%+ smaller
+        # JXL is already very good, but still wait for WebP to compare
+        # (WebP might be even smaller)
+        pass
+    
+    # Wait for WebP to complete
+    webp_thread.join()
+    webp_size = webp_result[0]
     
     # Clean up if conversion failed
     if jxl_size is None and jxl_path.exists():

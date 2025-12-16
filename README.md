@@ -171,11 +171,19 @@ Use a custom config file:
 python main.py /path/to/images --config /path/to/config.json
 ```
 
+Process with custom number of parallel workers (overrides config.threads):
+```bash
+python main.py /path/to/images --workers 4
+```
+
 ### Features
 
 - **Automatic format detection**: Scans and reports all image formats found
 - **Smart compression**: Only keeps converted files if they're at least 5% smaller (configurable)
-- **Multi-threading**: Optional parallel processing for faster batch operations (configurable)
+- **Parallel processing**: Processes multiple images concurrently (configurable via config or --workers flag)
+- **Parallel conversions**: Converts to JPEG XL and WebP simultaneously for each image
+- **Configurable compression**: Compression settings fully configurable via config.json
+- **Skip optimized files**: Automatically skips files already in JXL or WebP format
 - **Progress tracking**: Real-time progress with file-by-file updates
 - **Hang detection**: Automatically detects if processing stalls (5+ minutes)
 - **Error notifications**: macOS notifications for errors and hangs (requires terminal-notifier)
@@ -308,16 +316,21 @@ A default `config.json` file is created automatically when you first run the too
 ## How It Works
 
 1. **Scans** the specified folder for image files (recursively by default)
-2. **For each image:**
-   - Converts to JPEG XL (lossless, highest compression) - if available
-   - Converts to WebP (lossless, highest compression)
-  - Converts to JPEG XL (lossless, highest compression) - if available
-  - Converts to WebP (lossless, highest compression)
-  - Compares file sizes of original, JPEG XL, and WebP
-  - **Only keeps converted file if it meets the minimum improvement threshold** (configurable, default 5%)
+2. **For each image (processed in parallel):**
+   - Skips files already in JXL or WebP format
+   - Converts to JPEG XL and WebP **simultaneously** (lossless, configurable compression) - if available
+   - Compares file sizes of original, JPEG XL, and WebP
+   - **Only keeps converted file if it meets the minimum improvement threshold** (configurable, default 5%)
    - Deletes temporary files
 3. **Reports** detailed statistics on compression results
 4. **Logs** all activity to `image-squisher.log` for troubleshooting
+
+### Performance Optimizations
+
+- **Parallel image processing**: Multiple images processed concurrently (configurable via `threads` in config or `--workers` flag)
+- **Parallel format conversion**: JPEG XL and WebP conversions run simultaneously for each image
+- **Configurable compression settings**: Compression effort/quality fully configurable via config.json (defaults: effort 9 for JPEG XL, method 6 for WebP)
+- **Smart skipping**: Automatically skips files already in optimized formats
 
 ### Special Handling
 
