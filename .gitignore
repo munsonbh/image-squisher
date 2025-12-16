@@ -50,3 +50,4 @@ image-squisher.log
 cleanup_conan.sh
 CLEANUP.md
 
+format_learning/*
