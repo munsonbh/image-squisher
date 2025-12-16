@@ -120,12 +120,13 @@ def send_notification(title: str, message: str, sound: str = 'default', enabled:
     return False
 
 
-def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
+def setup_logging(log_file: Optional[str] = None, log_verbosity: str = 'INFO') -> logging.Logger:
     """
     Set up logging to both file and console.
     
     Args:
         log_file: Path to log file (default: image-squisher.log in current directory)
+        log_verbosity: Logging level ('DEBUG', 'INFO', 'WARNING', 'ERROR')
         
     Returns:
         Configured logger
@@ -135,16 +136,25 @@ def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
     
     log_file = Path(log_file)
     
+    # Map verbosity string to logging level
+    verbosity_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR
+    }
+    log_level = verbosity_map.get(log_verbosity.upper(), logging.INFO)
+    
     # Create logger
     logger = logging.getLogger('image-squisher')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(log_level)
     
     # Remove existing handlers
     logger.handlers.clear()
     
-    # File handler
+    # File handler (uses configured verbosity)
     file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(log_level)
     file_formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -152,7 +162,7 @@ def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
     
-    # Console handler (less verbose)
+    # Console handler (less verbose - always WARNING or higher)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.WARNING)  # Only show warnings/errors to console
     console_formatter = logging.Formatter('%(levelname)s: %(message)s')
@@ -210,7 +220,7 @@ def main():
         config = Config()
     
     # Set up logging
-    logger = setup_logging(config.log_file)
+    logger = setup_logging(config.log_file, config.log_verbosity)
     
     print(f"Scanning folder: {folder_path}")
     # Command-line argument overrides config

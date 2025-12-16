@@ -31,6 +31,7 @@ class Config:
         
         # Logging and notifications
         self.log_file: str = config_dict.get('log_file', 'image-squisher.log')
+        self.log_verbosity: str = config_dict.get('log_verbosity', 'INFO').upper()
         self.enable_notifications: bool = config_dict.get('enable_notifications', True)
         
         # Validate values
@@ -54,6 +55,8 @@ class Config:
             raise ValueError("conversion_timeout must be >= 1")
         if self.max_animated_frames < 1:
             raise ValueError("max_animated_frames must be >= 1")
+        if self.log_verbosity not in ('DEBUG', 'INFO', 'WARNING', 'ERROR'):
+            raise ValueError("log_verbosity must be one of: DEBUG, INFO, WARNING, ERROR")
         
         # Normalize skip_extensions to lowercase with dots
         normalized = []
@@ -85,6 +88,8 @@ def load_config(config_path: Optional[Path] = None) -> Config:
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config_dict = json.load(f)
+        # Remove _comments field if present (used for documentation only)
+        config_dict.pop('_comments', None)
         return Config(config_dict)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in config file: {e}")
@@ -111,6 +116,7 @@ def create_default_config(config_path: Path) -> None:
         "conversion_timeout": 300,
         "max_animated_frames": 1000,
         "log_file": "image-squisher.log",
+        "log_verbosity": "INFO",
         "enable_notifications": True
     }
     

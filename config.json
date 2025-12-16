@@ -1,5 +1,20 @@
 {
-  "threads": 1,
+  "_comments": {
+    "threads": "Number of parallel worker threads for processing images. Set to 1 for single-threaded, or use number of CPU cores for maximum speed.",
+    "min_improvement_pct": "Minimum percentage size reduction required to keep a converted file. If conversion doesn't save at least this much, original is kept. Range: 0-100.",
+    "hang_timeout": "Seconds to wait without progress before reporting a potential hang. Used to detect stuck conversions.",
+    "recursive": "If true, processes images in subdirectories. If false, only processes top-level folder.",
+    "skip_extensions": "File extensions to skip (already optimized formats). Extensions should include the leading dot (e.g., '.webp').",
+    "jpegxl_quality": "JPEG XL quality setting (1-100). 100 = mathematically lossless. Lower values reduce file size but may introduce loss.",
+    "jpegxl_effort": "JPEG XL compression effort (0-9). Higher values = better compression but slower. 9 = maximum compression.",
+    "webp_method": "WebP compression method (0-6). Higher values = better compression but slower. 6 = maximum compression.",
+    "conversion_timeout": "Maximum seconds to wait for a single image conversion before timing out.",
+    "max_animated_frames": "Maximum number of frames to process for animated GIFs. Prevents processing extremely large animations.",
+    "log_file": "Path to the log file where processing details are written.",
+    "log_verbosity": "Logging verbosity level: 'DEBUG' (most verbose), 'INFO' (default), 'WARNING', or 'ERROR' (least verbose).",
+    "enable_notifications": "If true, sends system notifications for completion, errors, and hang detection (macOS/Windows/Linux)."
+  },
+  "threads": 8,
   "min_improvement_pct": 5.0,
   "hang_timeout": 300,
   "recursive": true,
@@ -13,6 +28,7 @@
   "conversion_timeout": 300,
   "max_animated_frames": 1000,
   "log_file": "image-squisher.log",
+  "log_verbosity": "INFO",
   "enable_notifications": true
 }
 

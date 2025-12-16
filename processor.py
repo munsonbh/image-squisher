@@ -1,6 +1,7 @@
 """Image conversion to JPEG XL and WebP formats."""
 
 import io
+import logging
 import subprocess
 import shutil
 import platform
@@ -247,6 +248,8 @@ def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] =
                     
                 except Exception as e:
                     # If animated conversion fails, return None
+                    logger = logging.getLogger('image-squisher')
+                    logger.debug(f"Animated WebP conversion failed for {image_path.name}: {e}")
                     return None
             
             # Static image conversion
@@ -270,6 +273,8 @@ def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] =
             
             return output_path.stat().st_size
     except Exception as e:
+        logger = logging.getLogger('image-squisher')
+        logger.debug(f"WebP conversion failed for {image_path.name}: {e}")
         return None
 
 
@@ -286,6 +291,8 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
         Tuple of (jxl_path, webp_path, jxl_size, webp_size)
         Paths and sizes will be None if conversion failed
     """
+    logger = logging.getLogger('image-squisher')
+    
     base_name = image_path.stem
     
     jxl_path = temp_dir / f"{base_name}.tmp.jxl"
@@ -294,17 +301,36 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
     # Convert both formats in parallel using threads
     jxl_result = [None]  # Use list to allow modification from nested function
     webp_result = [None]
+    jxl_error = [None]
+    webp_error = [None]
     
     def convert_jxl():
-        jxl_result[0] = convert_to_jpegxl(image_path, jxl_path)
+        try:
+            jxl_result[0] = convert_to_jpegxl(image_path, jxl_path)
+            if jxl_result[0] is None:
+                logger.info(f"JXL conversion failed for {image_path.name}")
+            else:
+                logger.info(f"JXL conversion succeeded for {image_path.name}: {jxl_result[0]} bytes")
+        except Exception as e:
+            jxl_error[0] = str(e)
+            logger.warning(f"JXL conversion exception for {image_path.name}: {e}", exc_info=True)
     
     def convert_webp():
-        webp_result[0] = convert_to_webp(image_path, webp_path)
+        try:
+            webp_result[0] = convert_to_webp(image_path, webp_path)
+            if webp_result[0] is None:
+                logger.info(f"WebP conversion failed for {image_path.name}")
+            else:
+                logger.info(f"WebP conversion succeeded for {image_path.name}: {webp_result[0]} bytes")
+        except Exception as e:
+            webp_error[0] = str(e)
+            logger.warning(f"WebP conversion exception for {image_path.name}: {e}", exc_info=True)
     
     # Start both conversions in parallel
     jxl_thread = threading.Thread(target=convert_jxl)
     webp_thread = threading.Thread(target=convert_webp)
     
+    logger.info(f"Starting both JXL and WebP conversions in parallel for {image_path.name}")
     jxl_thread.start()
     webp_thread.start()
     
@@ -323,6 +349,20 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
     # Wait for WebP to complete
     webp_thread.join()
     webp_size = webp_result[0]
+    
+    # Log results for debugging
+    if jxl_size is None and webp_size is None:
+        logger.warning(f"Both JXL and WebP conversions failed for {image_path.name}")
+        if jxl_error[0]:
+            logger.warning(f"JXL error: {jxl_error[0]}")
+        if webp_error[0]:
+            logger.warning(f"WebP error: {webp_error[0]}")
+    elif jxl_size is None:
+        logger.info(f"JXL conversion failed, WebP succeeded ({webp_size} bytes) for {image_path.name}")
+    elif webp_size is None:
+        logger.info(f"WebP conversion failed, JXL succeeded ({jxl_size} bytes) for {image_path.name}")
+    else:
+        logger.info(f"Both conversions succeeded for {image_path.name}: JXL={jxl_size} bytes, WebP={webp_size} bytes")
     
     # Clean up if conversion failed
     if jxl_size is None and jxl_path.exists():
