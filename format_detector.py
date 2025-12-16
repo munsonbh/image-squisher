@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, Optional
 from PIL import Image
 
 # Common image extensions
@@ -27,18 +27,33 @@ def is_image_file(filepath: Path) -> bool:
         return False
 
 
-def scan_folder(folder_path: Path, recursive: bool = False) -> List[Path]:
+def scan_folder(folder_path: Path, recursive: bool = False, skip_extensions: Optional[List[str]] = None) -> List[Path]:
     """
     Scan a folder for image files.
+    Skips file types specified in skip_extensions (defaults to .webp and .jxl).
     
     Args:
         folder_path: Path to the folder to scan
         recursive: If True, scan subdirectories recursively
+        skip_extensions: List of extensions to skip (e.g., ['.webp', '.jxl']). 
+                        If None, uses default from config.
         
     Returns:
         List of paths to valid image files
     """
     image_files = []
+    
+    # Use provided skip_extensions or default
+    if skip_extensions is None:
+        try:
+            from config_loader import load_config
+            config = load_config()
+            skip_extensions_set = set(config.skip_extensions)
+        except Exception:
+            # Fallback to default if config can't be loaded
+            skip_extensions_set = {'.webp', '.jxl'}
+    else:
+        skip_extensions_set = {ext.lower() for ext in skip_extensions}
     
     if recursive:
         pattern = '**/*'
@@ -47,6 +62,9 @@ def scan_folder(folder_path: Path, recursive: bool = False) -> List[Path]:
     
     for filepath in folder_path.glob(pattern):
         if filepath.is_file() and filepath.suffix.lower() in IMAGE_EXTENSIONS:
+            # Skip specified file types
+            if filepath.suffix.lower() in skip_extensions_set:
+                continue
             if is_image_file(filepath):
                 image_files.append(filepath)
     

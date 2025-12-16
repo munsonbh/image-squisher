@@ -1,0 +1,18 @@
+{
+  "threads": 1,
+  "min_improvement_pct": 5.0,
+  "hang_timeout": 300,
+  "recursive": true,
+  "skip_extensions": [
+    ".webp",
+    ".jxl"
+  ],
+  "jpegxl_quality": 100,
+  "jpegxl_effort": 9,
+  "webp_method": 6,
+  "conversion_timeout": 300,
+  "max_animated_frames": 1000,
+  "log_file": "image-squisher.log",
+  "enable_notifications": true
+}
+

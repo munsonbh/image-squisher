@@ -10,9 +10,12 @@ import time
 import platform
 from pathlib import Path
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from format_detector import scan_folder, detect_formats
 from file_manager import process_image
+from config_loader import load_config, Config
 
 
 def format_bytes(bytes: int) -> str:
@@ -47,7 +50,7 @@ def check_terminal_notifier() -> Optional[str]:
     return None
 
 
-def send_notification(title: str, message: str, sound: str = 'default') -> bool:
+def send_notification(title: str, message: str, sound: str = 'default', enabled: bool = True) -> bool:
     """
     Send a notification (macOS: terminal-notifier, Windows: toast, Linux: notify-send).
     
@@ -55,10 +58,14 @@ def send_notification(title: str, message: str, sound: str = 'default') -> bool:
         title: Notification title
         message: Notification message
         sound: Notification sound (macOS only, default: 'default')
+        enabled: Whether notifications are enabled
         
     Returns:
         True if notification was sent, False otherwise
     """
+    if not enabled:
+        return False
+    
     system = platform.system()
     
     if system == 'Darwin':  # macOS
@@ -113,7 +120,7 @@ def send_notification(title: str, message: str, sound: str = 'default') -> bool:
     return False
 
 
-def setup_logging(log_file: Optional[Path] = None) -> logging.Logger:
+def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
     """
     Set up logging to both file and console.
     
@@ -124,7 +131,9 @@ def setup_logging(log_file: Optional[Path] = None) -> logging.Logger:
         Configured logger
     """
     if log_file is None:
-        log_file = Path('image-squisher.log')
+        log_file = 'image-squisher.log'
+    
+    log_file = Path(log_file)
     
     # Create logger
     logger = logging.getLogger('image-squisher')
@@ -167,6 +176,11 @@ def main():
         action='store_true',
         help='Only process top-level folder (disable recursive scanning)'
     )
+    parser.add_argument(
+        '--config',
+        type=str,
+        help='Path to config file (default: config.json in current directory)'
+    )
     
     args = parser.parse_args()
     
@@ -180,19 +194,31 @@ def main():
         print(f"Error: '{folder_path}' is not a directory.", file=sys.stderr)
         sys.exit(1)
     
+    # Load configuration
+    try:
+        config_path = Path(args.config) if args.config else None
+        config = load_config(config_path)
+    except Exception as e:
+        print(f"Warning: Could not load config file: {e}", file=sys.stderr)
+        print("Using default configuration.", file=sys.stderr)
+        config = Config()
+    
     # Set up logging
-    logger = setup_logging()
+    logger = setup_logging(config.log_file)
     
     print(f"Scanning folder: {folder_path}")
-    recursive = not args.no_recursive
+    # Command-line argument overrides config
+    recursive = not args.no_recursive if args.no_recursive else config.recursive
     if recursive:
         print("Mode: Recursive (processing subdirectories)")
     else:
         print("Mode: Top-level only")
+    if config.threads > 1:
+        print(f"Threading: {config.threads} threads")
     print()
     
     # Scan for images
-    image_files = scan_folder(folder_path, recursive=recursive)
+    image_files = scan_folder(folder_path, recursive=recursive, skip_extensions=config.skip_extensions)
     
     if not image_files:
         print("No image files found.")
@@ -229,64 +255,168 @@ def main():
     errors = 0
     start_time = time.time()
     last_progress_time = time.time()
-    hang_timeout = 300  # 5 minutes without progress = potential hang
+    hang_timeout = config.hang_timeout
     
-    for i, image_path in enumerate(image_files, 1):
-        current_time = time.time()
-        
-        # Check for potential hang (no progress for hang_timeout seconds)
-        if current_time - last_progress_time > hang_timeout:
-            error_msg = f"Potential hang detected! Last processed: {image_files[i-2].name if i > 1 else 'none'}"
-            logger.error(error_msg)
-            logger.error(f"Current folder: {image_path.parent}")
-            logger.error(f"Stuck on file: {image_path.name}")
-            send_notification(
-                'Image Squisher - Hang Detected',
-                f"Script may be hung processing:\n{image_path.parent}\n\nFile: {image_path.name}",
-                'Basso'
-            )
-            print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
-            print(f"   Current folder: {image_path.parent}")
-            print(f"   Stuck on file: {image_path.name}")
-            # Continue processing but log the issue
-        
-        print(f"[{i}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
-        
+    # Thread-safe counters
+    stats_lock = Lock()
+    last_progress_lock = Lock()
+    
+    def process_single_image(image_path: Path, index: int) -> tuple:
+        """Process a single image and return results."""
         try:
-            process_start = time.time()
             success, format_kept, original_size, final_size = process_image(image_path)
-            process_duration = time.time() - process_start
+            current_time = time.time()
             
-            # Update last progress time
-            last_progress_time = time.time()
-        
-            if success:
-                total_original += original_size
-                total_final += final_size
-                results[format_kept] += 1
+            with stats_lock:
+                nonlocal total_original, total_final, results, errors
                 
-                savings = original_size - final_size
-                savings_pct = (savings / original_size * 100) if original_size > 0 else 0
-                
-                print(f"{format_kept.upper()} kept ({format_bytes(original_size)} → {format_bytes(final_size)}, "
-                      f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
-            else:
-                errors += 1
-                logger.warning(f"Failed to process {image_path.name}, kept original")
-                print(f"ERROR (kept original)")
+                if success:
+                    total_original += original_size
+                    total_final += final_size
+                    results[format_kept] += 1
+                    
+                    savings = original_size - final_size
+                    savings_pct = (savings / original_size * 100) if original_size > 0 else 0
+                    
+                    result = (True, index, image_path, format_kept, original_size, final_size, savings, savings_pct, None)
+                else:
+                    errors += 1
+                    logger.warning(f"Failed to process {image_path.name}, kept original")
+                    result = (False, index, image_path, 'original', original_size, original_size, 0, 0, None)
+            
+            with last_progress_lock:
+                nonlocal last_progress_time
+                last_progress_time = current_time
+            
+            return result
         except Exception as e:
-            errors += 1
+            current_time = time.time()
+            with stats_lock:
+                errors += 1
+            with last_progress_lock:
+                nonlocal last_progress_time
+                last_progress_time = current_time
             error_msg = f"Exception processing {image_path.name}: {str(e)}"
             logger.error(error_msg, exc_info=True)
             logger.error(f"Error in folder: {image_path.parent}")
-            print(f"ERROR (kept original)")
+            return (False, index, image_path, 'original', 0, 0, 0, 0, str(e))
+    
+    # Process images with or without threading
+    if config.threads > 1:
+        # Multi-threaded processing
+        with ThreadPoolExecutor(max_workers=config.threads) as executor:
+            # Submit all tasks
+            future_to_image = {
+                executor.submit(process_single_image, image_path, i): (i, image_path)
+                for i, image_path in enumerate(image_files, 1)
+            }
             
-            # Send notification for exceptions
-            send_notification(
-                'Image Squisher - Error',
-                f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
-                'Basso'
-            )
+            # Process completed tasks as they finish
+            completed = 0
+            for future in as_completed(future_to_image):
+                completed += 1
+                i, image_path = future_to_image[future]
+                
+                try:
+                    success, idx, img_path, format_kept, orig_size, fin_size, savings, savings_pct, error = future.result()
+                    
+                    # Check for hang (thread-safe read)
+                    current_time = time.time()
+                    with last_progress_lock:
+                        last_progress = last_progress_time
+                    if current_time - last_progress > hang_timeout:
+                        error_msg = f"Potential hang detected! Completed: {completed}/{len(image_files)}"
+                        logger.error(error_msg)
+                        logger.error(f"Current folder: {img_path.parent}")
+                        logger.error(f"Stuck on file: {img_path.name}")
+                        send_notification(
+                            'Image Squisher - Hang Detected',
+                            f"Script may be hung processing:\n{img_path.parent}\n\nFile: {img_path.name}",
+                            'Basso',
+                            config.enable_notifications
+                        )
+                        print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
+                        print(f"   Current folder: {img_path.parent}")
+                        print(f"   Stuck on file: {img_path.name}")
+                    
+                    print(f"[{completed}/{len(image_files)}] Processing: {img_path.name}", end=' ... ', flush=True)
+                    
+                    if success:
+                        print(f"{format_kept.upper()} kept ({format_bytes(orig_size)} → {format_bytes(fin_size)}, "
+                              f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
+                    else:
+                        print(f"ERROR (kept original)")
+                        if error:
+                            send_notification(
+                                'Image Squisher - Error',
+                                f"Error processing:\n{img_path.name}\n\nFolder: {img_path.parent}",
+                                'Basso',
+                                config.enable_notifications
+                            )
+                except Exception as e:
+                    print(f"[{completed}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
+                    print(f"ERROR (kept original)")
+                    logger.error(f"Unexpected error processing {image_path.name}: {str(e)}", exc_info=True)
+    else:
+        # Single-threaded processing (original behavior)
+        for i, image_path in enumerate(image_files, 1):
+            current_time = time.time()
+            
+            # Check for potential hang (no progress for hang_timeout seconds)
+            if current_time - last_progress_time > hang_timeout:
+                error_msg = f"Potential hang detected! Last processed: {image_files[i-2].name if i > 1 else 'none'}"
+                logger.error(error_msg)
+                logger.error(f"Current folder: {image_path.parent}")
+                logger.error(f"Stuck on file: {image_path.name}")
+                send_notification(
+                    'Image Squisher - Hang Detected',
+                    f"Script may be hung processing:\n{image_path.parent}\n\nFile: {image_path.name}",
+                    'Basso',
+                    config.enable_notifications
+                )
+                print(f"\n⚠ WARNING: Potential hang detected! Check log file for details.")
+                print(f"   Current folder: {image_path.parent}")
+                print(f"   Stuck on file: {image_path.name}")
+                # Continue processing but log the issue
+            
+            print(f"[{i}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
+            
+            try:
+                process_start = time.time()
+                success, format_kept, original_size, final_size = process_image(image_path)
+                process_duration = time.time() - process_start
+                
+                # Update last progress time
+                last_progress_time = time.time()
+            
+                if success:
+                    total_original += original_size
+                    total_final += final_size
+                    results[format_kept] += 1
+                    
+                    savings = original_size - final_size
+                    savings_pct = (savings / original_size * 100) if original_size > 0 else 0
+                    
+                    print(f"{format_kept.upper()} kept ({format_bytes(original_size)} → {format_bytes(final_size)}, "
+                          f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
+                else:
+                    errors += 1
+                    logger.warning(f"Failed to process {image_path.name}, kept original")
+                    print(f"ERROR (kept original)")
+            except Exception as e:
+                errors += 1
+                error_msg = f"Exception processing {image_path.name}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                logger.error(f"Error in folder: {image_path.parent}")
+                print(f"ERROR (kept original)")
+                
+                # Send notification for exceptions
+                send_notification(
+                    'Image Squisher - Error',
+                    f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
+                    'Basso',
+                    config.enable_notifications
+                )
     
     total_duration = time.time() - start_time
     
@@ -316,20 +446,23 @@ def main():
     logger.info(f"Saved: {format_bytes(savings)} ({savings_pct:.1f}%)")
     
     # Send completion notification
-    if errors > 0:
-        send_notification(
-            'Image Squisher - Completed with Errors',
-            f"Processed {len(image_files)} images\n{errors} errors\nSaved: {format_bytes(savings)} ({savings_pct:.1f}%)",
-            'Glass'
-        )
-    else:
-        send_notification(
-            'Image Squisher - Completed',
-            f"Processed {len(image_files)} images\nSaved: {format_bytes(savings)} ({savings_pct:.1f}%)",
-            'Ping'
-        )
+    if config.enable_notifications:
+        if errors > 0:
+            send_notification(
+                'Image Squisher - Completed with Errors',
+                f"Processed {len(image_files)} images\n{errors} errors\nSaved: {format_bytes(savings)} ({savings_pct:.1f}%)",
+                'Glass',
+                config.enable_notifications
+            )
+        else:
+            send_notification(
+                'Image Squisher - Completed',
+                f"Processed {len(image_files)} images\nSaved: {format_bytes(savings)} ({savings_pct:.1f}%)",
+                'Ping',
+                config.enable_notifications
+            )
     
-    print(f"\nLog file: image-squisher.log")
+    print(f"\nLog file: {config.log_file}")
 
 
 if __name__ == '__main__':

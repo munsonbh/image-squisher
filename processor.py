@@ -73,7 +73,7 @@ def _check_cjxl_available() -> Optional[str]:
     return None
 
 
-def convert_to_jpegxl(image_path: Path, output_path: Path) -> Optional[int]:
+def convert_to_jpegxl(image_path: Path, output_path: Path, quality: Optional[int] = None, effort: Optional[int] = None, timeout: Optional[int] = None) -> Optional[int]:
     """
     Convert an image to JPEG XL format (lossless, highest compression).
     Uses libjxl's cjxl command-line tool instead of Pillow.
@@ -83,10 +83,33 @@ def convert_to_jpegxl(image_path: Path, output_path: Path) -> Optional[int]:
     Args:
         image_path: Path to the source image
         output_path: Path where the JPEG XL file should be saved
+        quality: JPEG XL quality (1-100, 100 = lossless). If None, uses config value.
+        effort: JPEG XL effort (0-9, 9 = highest compression). If None, uses config value.
+        timeout: Conversion timeout in seconds. If None, uses config value.
         
     Returns:
         File size in bytes if successful, None if conversion failed
     """
+    # Get settings from config if not provided
+    if quality is None or effort is None or timeout is None:
+        try:
+            from config_loader import load_config
+            config = load_config()
+            if quality is None:
+                quality = config.jpegxl_quality
+            if effort is None:
+                effort = config.jpegxl_effort
+            if timeout is None:
+                timeout = config.conversion_timeout
+        except Exception:
+            # Fallback to defaults
+            if quality is None:
+                quality = 100
+            if effort is None:
+                effort = 9
+            if timeout is None:
+                timeout = 300
+    
     # Skip animated GIFs - JPEG XL doesn't support animation
     if is_animated_gif(image_path):
         return None
@@ -106,12 +129,12 @@ def convert_to_jpegxl(image_path: Path, output_path: Path) -> Optional[int]:
                 cjxl,
                 str(image_path),
                 str(output_path),
-                '-q', '100',  # Lossless quality
-                '-e', '9',  # Highest effort (best compression)
+                '-q', str(quality),
+                '-e', str(effort),
             ],
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=timeout,
         )
         
         if result.returncode == 0 and output_path.exists():
@@ -135,7 +158,7 @@ def convert_to_jpegxl(image_path: Path, output_path: Path) -> Optional[int]:
         return None
 
 
-def convert_to_webp(image_path: Path, output_path: Path) -> Optional[int]:
+def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] = None, max_frames: Optional[int] = None) -> Optional[int]:
     """
     Convert an image to WebP format (lossless, highest compression).
     Supports both static images and animated GIFs (converts to animated WebP).
@@ -143,10 +166,28 @@ def convert_to_webp(image_path: Path, output_path: Path) -> Optional[int]:
     Args:
         image_path: Path to the source image
         output_path: Path where the WebP file should be saved
+        method: WebP compression method (0-6, 6 = highest). If None, uses config value.
+        max_frames: Maximum frames for animated GIFs. If None, uses config value.
         
     Returns:
         File size in bytes if successful, None if conversion failed
     """
+    # Get settings from config if not provided
+    if method is None or max_frames is None:
+        try:
+            from config_loader import load_config
+            config = load_config()
+            if method is None:
+                method = config.webp_method
+            if max_frames is None:
+                max_frames = config.max_animated_frames
+        except Exception:
+            # Fallback to defaults
+            if method is None:
+                method = 6
+            if max_frames is None:
+                max_frames = 1000
+    
     try:
         with Image.open(image_path) as img:
             # Check if it's an animated GIF
@@ -158,7 +199,6 @@ def convert_to_webp(image_path: Path, output_path: Path) -> Optional[int]:
                 try:
                     # Extract all frames
                     frame_count = 0
-                    max_frames = 1000  # Safety limit to prevent hangs
                     
                     while True:
                         # Convert frame to RGBA if needed
@@ -198,7 +238,7 @@ def convert_to_webp(image_path: Path, output_path: Path) -> Optional[int]:
                         append_images=frames[1:],
                         duration=durations,
                         lossless=True,
-                        method=6,  # Highest compression
+                        method=method,
                         loop=img.info.get('loop', 0),  # Preserve loop count if available
                     )
                     
@@ -223,7 +263,7 @@ def convert_to_webp(image_path: Path, output_path: Path) -> Optional[int]:
                 output_path,
                 format='WEBP',
                 lossless=True,
-                method=6,  # Highest compression method (0-6, 6 is slowest but best compression)
+                method=method,
                 # Metadata is not copied by default
             )
             

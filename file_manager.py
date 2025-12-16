@@ -37,7 +37,7 @@ def compare_and_keep_smallest(
     webp_path: Optional[Path],
     jxl_size: Optional[int],
     webp_size: Optional[int],
-    min_improvement_pct: float = 5.0
+    min_improvement_pct: Optional[float] = None
 ) -> Tuple[Path, str]:
     """
     Compare file sizes and determine which file to keep.
@@ -49,12 +49,23 @@ def compare_and_keep_smallest(
         webp_path: Path to WebP version (if conversion succeeded)
         jxl_size: Size of JPEG XL file in bytes
         webp_size: Size of WebP file in bytes
-        min_improvement_pct: Minimum percentage improvement required to keep converted file (default: 5.0)
+        min_improvement_pct: Minimum percentage improvement required to keep converted file.
+                            If None, uses value from config.
         
     Returns:
         Tuple of (path_to_keep, format_name)
         format_name will be 'original', 'jxl', or 'webp'
     """
+    # Get min_improvement_pct from config if not provided
+    if min_improvement_pct is None:
+        try:
+            from config_loader import load_config
+            config = load_config()
+            min_improvement_pct = config.min_improvement_pct
+        except Exception:
+            # Fallback to default
+            min_improvement_pct = 5.0
+    
     original_size = get_file_size(original_path)
     
     # Build list of available options
@@ -137,12 +148,13 @@ def cleanup_temp_files(*filepaths: Optional[Path]) -> None:
                 pass
 
 
-def process_image(image_path: Path) -> Tuple[bool, str, int, int]:
+def process_image(image_path: Path, min_improvement_pct: Optional[float] = None) -> Tuple[bool, str, int, int]:
     """
     Process a single image: convert, compare, and keep smallest.
     
     Args:
         image_path: Path to the image to process
+        min_improvement_pct: Minimum improvement percentage. If None, uses config value.
         
     Returns:
         Tuple of (success, format_kept, original_size, final_size)
@@ -165,7 +177,7 @@ def process_image(image_path: Path) -> Tuple[bool, str, int, int]:
     try:
         # Compare and determine which to keep
         path_to_keep, format_name = compare_and_keep_smallest(
-            image_path, jxl_path, webp_path, jxl_size, webp_size
+            image_path, jxl_path, webp_path, jxl_size, webp_size, min_improvement_pct
         )
         
         # If we're keeping a converted file, replace the original

@@ -166,14 +166,144 @@ Process only top-level folder:
 python main.py /path/to/images --no-recursive
 ```
 
+Use a custom config file:
+```bash
+python main.py /path/to/images --config /path/to/config.json
+```
+
 ### Features
 
 - **Automatic format detection**: Scans and reports all image formats found
-- **Smart compression**: Only keeps converted files if they're at least 5% smaller
+- **Smart compression**: Only keeps converted files if they're at least 5% smaller (configurable)
+- **Multi-threading**: Optional parallel processing for faster batch operations (configurable)
 - **Progress tracking**: Real-time progress with file-by-file updates
 - **Hang detection**: Automatically detects if processing stalls (5+ minutes)
 - **Error notifications**: macOS notifications for errors and hangs (requires terminal-notifier)
 - **Detailed logging**: All activity logged to `image-squisher.log`
+
+## Configuration
+
+Image Squisher can be configured using a `config.json` file in the current directory, or by specifying a custom config file with the `--config` argument. If no config file is found, default values are used.
+
+### Creating a Config File
+
+A default `config.json` file is created automatically when you first run the tool. You can edit this file to customize behavior:
+
+```json
+{
+  "threads": 1,
+  "min_improvement_pct": 5.0,
+  "hang_timeout": 300,
+  "recursive": true,
+  "skip_extensions": [".webp", ".jxl"],
+  "jpegxl_quality": 100,
+  "jpegxl_effort": 9,
+  "webp_method": 6,
+  "conversion_timeout": 300,
+  "max_animated_frames": 1000,
+  "log_file": "image-squisher.log",
+  "enable_notifications": true
+}
+```
+
+### Configuration Options
+
+#### Processing Settings
+
+- **`threads`** (integer, default: `1`)
+  - Number of threads to use for parallel processing
+  - Set to `1` for single-threaded (original behavior)
+  - Increase for faster processing on multi-core systems (e.g., `4` or `8`)
+  - Note: Higher thread counts use more CPU and memory
+
+- **`min_improvement_pct`** (float, default: `5.0`)
+  - Minimum percentage size reduction required to keep a converted file
+  - If a converted file is less than this percentage smaller, the original is kept
+  - Range: 0.0 to 100.0
+  - Example: `5.0` means converted file must be at least 5% smaller
+
+- **`hang_timeout`** (integer, default: `300`)
+  - Time in seconds before a "hang" is detected
+  - If no progress is made for this duration, a warning is logged
+  - Default: 300 seconds (5 minutes)
+
+- **`recursive`** (boolean, default: `true`)
+  - Whether to process subdirectories recursively
+  - Can be overridden with `--no-recursive` command-line argument
+
+#### File Filtering
+
+- **`skip_extensions`** (array of strings, default: `[".webp", ".jxl"]`)
+  - File extensions to skip during scanning
+  - These files are assumed to already be optimized
+  - Extensions should include the leading dot (e.g., `".webp"` not `"webp"`)
+  - Example: `[".webp", ".jxl", ".avif"]` to skip all three formats
+
+#### Conversion Settings
+
+- **`jpegxl_quality`** (integer, default: `100`)
+  - JPEG XL quality setting (1-100)
+  - `100` = mathematically lossless
+  - Lower values may reduce file size but are not lossless
+
+- **`jpegxl_effort`** (integer, default: `9`)
+  - JPEG XL compression effort (0-9)
+  - `9` = highest compression, slowest
+  - Lower values are faster but produce larger files
+
+- **`webp_method`** (integer, default: `6`)
+  - WebP compression method (0-6)
+  - `6` = highest compression, slowest
+  - Lower values are faster but produce larger files
+
+- **`conversion_timeout`** (integer, default: `300`)
+  - Maximum time in seconds for a single image conversion
+  - Prevents the tool from hanging on problematic images
+  - Default: 300 seconds (5 minutes)
+
+- **`max_animated_frames`** (integer, default: `1000`)
+  - Maximum number of frames to process for animated GIFs
+  - Safety limit to prevent hangs on very large animations
+  - Increase if you have large animated GIFs that need processing
+
+#### Logging and Notifications
+
+- **`log_file`** (string, default: `"image-squisher.log"`)
+  - Path to the log file
+  - Can be relative or absolute path
+
+- **`enable_notifications`** (boolean, default: `true`)
+  - Whether to send system notifications for errors and completion
+  - Requires appropriate notification tools (terminal-notifier on macOS, etc.)
+
+### Example Configurations
+
+**Fast processing (lower quality, more threads):**
+```json
+{
+  "threads": 8,
+  "jpegxl_effort": 5,
+  "webp_method": 4,
+  "min_improvement_pct": 3.0
+}
+```
+
+**Maximum compression (slower, best quality):**
+```json
+{
+  "threads": 1,
+  "jpegxl_effort": 9,
+  "webp_method": 6,
+  "min_improvement_pct": 1.0
+}
+```
+
+**Skip additional formats:**
+```json
+{
+  "skip_extensions": [".webp", ".jxl", ".avif", ".heic"]
+}
+```
 
 ## How It Works
 
@@ -181,8 +311,10 @@ python main.py /path/to/images --no-recursive
 2. **For each image:**
    - Converts to JPEG XL (lossless, highest compression) - if available
    - Converts to WebP (lossless, highest compression)
-   - Compares file sizes of original, JPEG XL, and WebP
-   - **Only keeps converted file if it's at least 5% smaller** (preserves originals for minimal gains)
+  - Converts to JPEG XL (lossless, highest compression) - if available
+  - Converts to WebP (lossless, highest compression)
+  - Compares file sizes of original, JPEG XL, and WebP
+  - **Only keeps converted file if it meets the minimum improvement threshold** (configurable, default 5%)
    - Deletes temporary files
 3. **Reports** detailed statistics on compression results
 4. **Logs** all activity to `image-squisher.log` for troubleshooting
@@ -283,6 +415,8 @@ image-squisher/
 ├── format_detector.py   # Image format detection and scanning
 ├── processor.py         # Image conversion (JPEG XL, WebP)
 ├── file_manager.py      # Safe file operations and size comparison
+├── config_loader.py      # Configuration file loader
+├── config.json          # Configuration file (created automatically)
 ├── requirements.txt     # Python dependencies
 ├── setup.sh            # Automated setup script
 ├── Makefile            # Convenience commands
