@@ -346,13 +346,13 @@ def main():
                               f"-{format_bytes(savings)} / -{savings_pct:.1f}%)")
                     else:
                         print(f"ERROR (kept original)")
-                        if error:
-                            send_notification(
-                                'Image Squisher - Error',
-                                f"Error processing:\n{img_path.name}\n\nFolder: {img_path.parent}",
-                                'Basso',
-                                config.enable_notifications
-                            )
+                        # Send notification for any failure (exception or conversion failure)
+                        send_notification(
+                            'Image Squisher - Error',
+                            f"Error processing:\n{img_path.name}\n\nFolder: {img_path.parent}",
+                            'Basso',
+                            config.enable_notifications
+                        )
                 except Exception as e:
                     print(f"[{completed}/{len(image_files)}] Processing: {image_path.name}", end=' ... ', flush=True)
                     print(f"ERROR (kept original)")
@@ -403,6 +403,13 @@ def main():
                     errors += 1
                     logger.warning(f"Failed to process {image_path.name}, kept original")
                     print(f"ERROR (kept original)")
+                    # Send notification for conversion failures
+                    send_notification(
+                        'Image Squisher - Error',
+                        f"Error processing:\n{image_path.name}\n\nFolder: {image_path.parent}",
+                        'Basso',
+                        config.enable_notifications
+                    )
             except Exception as e:
                 errors += 1
                 error_msg = f"Exception processing {image_path.name}: {str(e)}"
