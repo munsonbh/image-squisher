@@ -19,7 +19,7 @@ function run(input, parameters) {
     var app = Application.currentApplication();
     app.includeStandardAdditions = true;
     
-    var results = [];
+    var processedFolders = [];  // Array to hold successfully processed folder paths
     var errors = [];
     
     // Process each folder in the input array
@@ -33,7 +33,8 @@ function run(input, parameters) {
         try {
             // Run the command
             var result = app.doShellScript(command);
-            results.push('Processed: ' + folderPath);
+            // Add the folder path to processedFolders so it can be passed to next action
+            processedFolders.push(folderPath);
             
             // Show notification for each folder processed
             app.doShellScript('terminal-notifier -title "Image Squisher" -message "Processing complete for: ' + folderPath + '" 2>/dev/null || true');
@@ -46,11 +47,17 @@ function run(input, parameters) {
         }
     }
     
-    // Return summary
+    // Return the processed folder paths - this allows the next Automator action to use them
+    // Note: app.doShellScript() already waits for the Python process to complete
+    // before continuing, so this return happens only after all processing is done
+    // Returning an array of paths allows Automator to pass them to the next action
+    
     if (errors.length > 0) {
-        return 'Processed ' + results.length + ' folder(s), ' + errors.length + ' error(s).\nErrors:\n' + errors.join('\n');
-    } else {
-        return 'Successfully processed ' + results.length + ' folder(s).';
+        // Log errors but still return processed folders
+        app.doShellScript('terminal-notifier -title "Image Squisher" -message "Completed with ' + errors.length + ' error(s). Check logs for details." 2>/dev/null || true');
     }
+    
+    // Return the array of processed folder paths - this is what the next Automator action needs
+    return processedFolders;
 }
 

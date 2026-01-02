@@ -14,7 +14,7 @@
     "log_verbosity": "Logging verbosity level: 'DEBUG' (most verbose), 'INFO' (default), 'WARNING', or 'ERROR' (least verbose).",
     "enable_notifications": "If true, sends system notifications for completion, errors, and hang detection (macOS/Windows/Linux)."
   },
-  "threads": 8,
+  "threads": 4,
   "min_improvement_pct": 5.0,
   "hang_timeout": 300,
   "recursive": true,
