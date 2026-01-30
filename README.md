@@ -210,7 +210,7 @@ A default `config.json` file is created automatically when you first run the too
   "conversion_timeout": 300,
   "max_animated_frames": 1000,
   "log_file": "image-squisher.log",
-  "enable_notifications": true
+  "enable_notifications": false
 }
 ```
 
@@ -280,8 +280,8 @@ A default `config.json` file is created automatically when you first run the too
   - Path to the log file
   - Can be relative or absolute path
 
-- **`enable_notifications`** (boolean, default: `true`)
-  - Whether to send system notifications for errors and completion
+- **`enable_notifications`** (boolean, default: `false`)
+  - When `true`, sends system notifications for errors and completion
   - Requires appropriate notification tools (terminal-notifier on macOS, etc.)
 
 ### Example Configurations

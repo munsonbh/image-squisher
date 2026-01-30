@@ -29,6 +29,6 @@
   "max_animated_frames": 1000,
   "log_file": "image-squisher.log",
   "log_verbosity": "INFO",
-  "enable_notifications": true
+  "enable_notifications": false
 }
 

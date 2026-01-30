@@ -32,7 +32,7 @@ class Config:
         # Logging and notifications
         self.log_file: str = config_dict.get('log_file', 'image-squisher.log')
         self.log_verbosity: str = config_dict.get('log_verbosity', 'INFO').upper()
-        self.enable_notifications: bool = config_dict.get('enable_notifications', True)
+        self.enable_notifications: bool = config_dict.get('enable_notifications', False)
         
         # Validate values
         self._validate()
@@ -117,7 +117,7 @@ def create_default_config(config_path: Path) -> None:
         "max_animated_frames": 1000,
         "log_file": "image-squisher.log",
         "log_verbosity": "INFO",
-        "enable_notifications": True
+        "enable_notifications": False
     }
     
     with open(config_path, 'w', encoding='utf-8') as f:
