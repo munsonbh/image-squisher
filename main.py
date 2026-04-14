@@ -6,7 +6,9 @@ import sys
 import subprocess
 import shutil
 import logging
+import signal
 import time
+import os
 import platform
 import threading
 from pathlib import Path
@@ -294,6 +296,63 @@ def main():
     results_lock = threading.Lock()
     completed_count = [0]  # Use list for mutable reference
     
+    # Runtime-adjustable concurrency: only slot_state['max_concurrent'] workers run at once.
+    # Signal handlers (SIGUSR1/SIGUSR2 on Unix) can change it mid-batch.
+    slot_condition = threading.Condition()
+    slot_state = {'active': 0, 'max_concurrent': num_workers}
+    
+    cpu_count = max(1, os.cpu_count() or 1)
+    adaptive_state = {'last_mode': None}
+    
+    def get_load_adaptive_settings():
+        """Return conversion settings adapted to current system load."""
+        normalized_load = 0.0
+        if hasattr(os, 'getloadavg'):
+            try:
+                load1, _, _ = os.getloadavg()
+                normalized_load = load1 / cpu_count
+            except OSError:
+                normalized_load = 0.0
+        
+        is_busy = (
+            config.adaptive_effort_enabled
+            and normalized_load >= config.busy_load_threshold
+        )
+        
+        if is_busy:
+            mode = 'busy'
+            settings = {
+                'jpegxl_quality': config.jpegxl_quality,
+                'jpegxl_effort': config.jpegxl_effort_busy,
+                'webp_method': config.webp_method_busy,
+                'max_animated_frames': config.max_animated_frames,
+                'conversion_timeout': config.conversion_timeout,
+            }
+        else:
+            mode = 'normal'
+            settings = {
+                'jpegxl_quality': config.jpegxl_quality,
+                'jpegxl_effort': config.jpegxl_effort,
+                'webp_method': config.webp_method,
+                'max_animated_frames': config.max_animated_frames,
+                'conversion_timeout': config.conversion_timeout,
+            }
+        
+        if adaptive_state['last_mode'] != mode:
+            adaptive_state['last_mode'] = mode
+            if mode == 'busy':
+                logger.info(
+                    f"Adaptive effort: BUSY mode (load={normalized_load:.2f}, "
+                    f"jxl_effort={settings['jpegxl_effort']}, webp_method={settings['webp_method']})"
+                )
+            else:
+                logger.info(
+                    f"Adaptive effort: NORMAL mode (load={normalized_load:.2f}, "
+                    f"jxl_effort={settings['jpegxl_effort']}, webp_method={settings['webp_method']})"
+                )
+        
+        return settings
+    
     def process_worker(image_queue: Queue, result_queue: Queue):
         """Worker thread that processes images from the queue."""
         while True:
@@ -302,8 +361,21 @@ def main():
                 break
             
             index, image_path = item
+            # Acquire a concurrency slot (throttled by slot_state['max_concurrent'])
+            with slot_condition:
+                while slot_state['active'] >= slot_state['max_concurrent']:
+                    slot_condition.wait()
+                slot_state['active'] += 1
             try:
-                success, format_kept, original_size, final_size = process_image(image_path)
+                conversion_settings = get_load_adaptive_settings()
+                success, format_kept, original_size, final_size = process_image(
+                    image_path,
+                    jpegxl_quality=conversion_settings['jpegxl_quality'],
+                    jpegxl_effort=conversion_settings['jpegxl_effort'],
+                    webp_method=conversion_settings['webp_method'],
+                    max_animated_frames=conversion_settings['max_animated_frames'],
+                    conversion_timeout=conversion_settings['conversion_timeout']
+                )
                 result_queue.put((index, image_path, success, format_kept, original_size, final_size, None))
             except Exception as e:
                 # Log exception with full traceback here where exception context exists
@@ -312,12 +384,31 @@ def main():
                 logger.error(f"Error in folder: {image_path.parent}")
                 result_queue.put((index, image_path, False, 'original', 0, 0, error_msg))
             finally:
+                with slot_condition:
+                    slot_state['active'] -= 1
+                    slot_condition.notify_all()
                 image_queue.task_done()
     
     if num_workers > 1:
         # Use threading for parallel processing
         image_queue = Queue()
         result_queue = Queue()
+        
+        # Optional: throttle/restore workers mid-batch via signals (Unix/macOS)
+        if hasattr(signal, 'SIGUSR1') and hasattr(signal, 'SIGUSR2'):
+            def _throttle_handler(signum, frame):
+                with slot_condition:
+                    slot_state['max_concurrent'] = 1
+                    slot_condition.notify_all()
+                print("\n  → Throttled to 1 worker (send SIGUSR2 to restore)", flush=True)
+            def _restore_handler(signum, frame):
+                with slot_condition:
+                    slot_state['max_concurrent'] = num_workers
+                    slot_condition.notify_all()
+                print(f"\n  → Restored to {num_workers} worker(s)", flush=True)
+            signal.signal(signal.SIGUSR1, _throttle_handler)
+            signal.signal(signal.SIGUSR2, _restore_handler)
+            print("  (Tip: SIGUSR1 = throttle to 1 worker, SIGUSR2 = restore — e.g. kill -USR1 <pid>)")
         
         # Start worker threads
         workers = []
@@ -450,7 +541,15 @@ def main():
             
             try:
                 process_start = time.time()
-                success, format_kept, original_size, final_size = process_image(image_path)
+                conversion_settings = get_load_adaptive_settings()
+                success, format_kept, original_size, final_size = process_image(
+                    image_path,
+                    jpegxl_quality=conversion_settings['jpegxl_quality'],
+                    jpegxl_effort=conversion_settings['jpegxl_effort'],
+                    webp_method=conversion_settings['webp_method'],
+                    max_animated_frames=conversion_settings['max_animated_frames'],
+                    conversion_timeout=conversion_settings['conversion_timeout']
+                )
                 process_duration = time.time() - process_start
                 
                 # Update last progress time

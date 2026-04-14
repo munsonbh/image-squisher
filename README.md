@@ -176,11 +176,15 @@ Process with custom number of parallel workers (overrides config.threads):
 python main.py /path/to/images --workers 4
 ```
 
+**Throttle mid-batch (Unix/macOS)** — If a large run is bogging down your machine, you can reduce to one worker without stopping the run. Find the process ID (e.g. from Activity Monitor or `pgrep -f "main.py"`), then:
+- **Throttle to 1 worker:** `kill -USR1 <pid>`
+- **Restore to full workers:** `kill -USR2 <pid>`
+
 ### Features
 
 - **Automatic format detection**: Scans and reports all image formats found
 - **Smart compression**: Only keeps converted files if they're at least 5% smaller (configurable)
-- **Parallel processing**: Processes multiple images concurrently (configurable via config or --workers flag)
+- **Parallel processing**: Processes multiple images concurrently (configurable via config or --workers flag); throttle mid-batch with SIGUSR1/SIGUSR2 on Unix/macOS
 - **Parallel conversions**: Converts to JPEG XL and WebP simultaneously for each image
 - **Configurable compression**: Compression settings fully configurable via config.json
 - **Skip optimized files**: Automatically skips files already in JXL or WebP format

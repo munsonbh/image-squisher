@@ -29,6 +29,12 @@ class Config:
         self.conversion_timeout: int = config_dict.get('conversion_timeout', 300)  # seconds
         self.max_animated_frames: int = config_dict.get('max_animated_frames', 1000)
         
+        # Adaptive conversion settings (load-aware effort/method tuning)
+        self.adaptive_effort_enabled: bool = config_dict.get('adaptive_effort_enabled', True)
+        self.busy_load_threshold: float = config_dict.get('busy_load_threshold', 0.7)
+        self.jpegxl_effort_busy: int = config_dict.get('jpegxl_effort_busy', 6)
+        self.webp_method_busy: int = config_dict.get('webp_method_busy', 4)
+        
         # Logging and notifications
         self.log_file: str = config_dict.get('log_file', 'image-squisher.log')
         self.log_verbosity: str = config_dict.get('log_verbosity', 'INFO').upper()
@@ -55,6 +61,12 @@ class Config:
             raise ValueError("conversion_timeout must be >= 1")
         if self.max_animated_frames < 1:
             raise ValueError("max_animated_frames must be >= 1")
+        if self.busy_load_threshold < 0:
+            raise ValueError("busy_load_threshold must be >= 0")
+        if not (0 <= self.jpegxl_effort_busy <= 9):
+            raise ValueError("jpegxl_effort_busy must be between 0 and 9")
+        if not (0 <= self.webp_method_busy <= 6):
+            raise ValueError("webp_method_busy must be between 0 and 6")
         if self.log_verbosity not in ('DEBUG', 'INFO', 'WARNING', 'ERROR'):
             raise ValueError("log_verbosity must be one of: DEBUG, INFO, WARNING, ERROR")
         
@@ -115,6 +127,10 @@ def create_default_config(config_path: Path) -> None:
         "webp_method": 6,
         "conversion_timeout": 300,
         "max_animated_frames": 1000,
+        "adaptive_effort_enabled": True,
+        "busy_load_threshold": 0.7,
+        "jpegxl_effort_busy": 6,
+        "webp_method_busy": 4,
         "log_file": "image-squisher.log",
         "log_verbosity": "INFO",
         "enable_notifications": False

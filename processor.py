@@ -278,7 +278,16 @@ def convert_to_webp(image_path: Path, output_path: Path, method: Optional[int] =
         return None
 
 
-def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int] = None) -> Tuple[Optional[Path], Optional[Path], Optional[int], Optional[int]]:
+def convert_image(
+    image_path: Path,
+    temp_dir: Path,
+    original_size: Optional[int] = None,
+    jpegxl_quality: Optional[int] = None,
+    jpegxl_effort: Optional[int] = None,
+    webp_method: Optional[int] = None,
+    max_animated_frames: Optional[int] = None,
+    conversion_timeout: Optional[int] = None
+) -> Tuple[Optional[Path], Optional[Path], Optional[int], Optional[int]]:
     """
     Convert an image to both JPEG XL and WebP formats in parallel.
     
@@ -298,6 +307,39 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
     jxl_path = temp_dir / f"{base_name}.tmp.jxl"
     webp_path = temp_dir / f"{base_name}.tmp.webp"
     
+    # Resolve conversion settings once for this image to avoid repeated config loads
+    if (
+        jpegxl_quality is None
+        or jpegxl_effort is None
+        or webp_method is None
+        or max_animated_frames is None
+        or conversion_timeout is None
+    ):
+        try:
+            from config_loader import load_config
+            config = load_config()
+            if jpegxl_quality is None:
+                jpegxl_quality = config.jpegxl_quality
+            if jpegxl_effort is None:
+                jpegxl_effort = config.jpegxl_effort
+            if webp_method is None:
+                webp_method = config.webp_method
+            if max_animated_frames is None:
+                max_animated_frames = config.max_animated_frames
+            if conversion_timeout is None:
+                conversion_timeout = config.conversion_timeout
+        except Exception:
+            if jpegxl_quality is None:
+                jpegxl_quality = 100
+            if jpegxl_effort is None:
+                jpegxl_effort = 9
+            if webp_method is None:
+                webp_method = 6
+            if max_animated_frames is None:
+                max_animated_frames = 1000
+            if conversion_timeout is None:
+                conversion_timeout = 300
+    
     # Convert both formats in parallel using threads
     jxl_result = [None]  # Use list to allow modification from nested function
     webp_result = [None]
@@ -306,7 +348,13 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
     
     def convert_jxl():
         try:
-            jxl_result[0] = convert_to_jpegxl(image_path, jxl_path)
+            jxl_result[0] = convert_to_jpegxl(
+                image_path,
+                jxl_path,
+                quality=jpegxl_quality,
+                effort=jpegxl_effort,
+                timeout=conversion_timeout
+            )
             if jxl_result[0] is None:
                 logger.info(f"JXL conversion failed for {image_path.name}")
             else:
@@ -317,7 +365,12 @@ def convert_image(image_path: Path, temp_dir: Path, original_size: Optional[int]
     
     def convert_webp():
         try:
-            webp_result[0] = convert_to_webp(image_path, webp_path)
+            webp_result[0] = convert_to_webp(
+                image_path,
+                webp_path,
+                method=webp_method,
+                max_frames=max_animated_frames
+            )
             if webp_result[0] is None:
                 logger.info(f"WebP conversion failed for {image_path.name}")
             else:

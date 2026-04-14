@@ -148,7 +148,15 @@ def cleanup_temp_files(*filepaths: Optional[Path]) -> None:
                 pass
 
 
-def process_image(image_path: Path, min_improvement_pct: Optional[float] = None) -> Tuple[bool, str, int, int]:
+def process_image(
+    image_path: Path,
+    min_improvement_pct: Optional[float] = None,
+    jpegxl_quality: Optional[int] = None,
+    jpegxl_effort: Optional[int] = None,
+    webp_method: Optional[int] = None,
+    max_animated_frames: Optional[int] = None,
+    conversion_timeout: Optional[int] = None
+) -> Tuple[bool, str, int, int]:
     """
     Process a single image: convert, compare, and keep smallest.
     
@@ -180,7 +188,16 @@ def process_image(image_path: Path, min_improvement_pct: Optional[float] = None)
     temp_dir = image_path.parent
     
     # Convert to both formats (in parallel)
-    jxl_path, webp_path, jxl_size, webp_size = convert_image(image_path, temp_dir, original_size)
+    jxl_path, webp_path, jxl_size, webp_size = convert_image(
+        image_path,
+        temp_dir,
+        original_size,
+        jpegxl_quality=jpegxl_quality,
+        jpegxl_effort=jpegxl_effort,
+        webp_method=webp_method,
+        max_animated_frames=max_animated_frames,
+        conversion_timeout=conversion_timeout
+    )
     
     try:
         # Compare and determine which to keep
