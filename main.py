@@ -6,6 +6,7 @@ import sys
 import subprocess
 import shutil
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 import time
 import os
@@ -154,8 +155,12 @@ def setup_logging(log_file: Optional[str] = None, log_verbosity: str = 'INFO') -
     # Remove existing handlers
     logger.handlers.clear()
     
-    # File handler (uses configured verbosity)
-    file_handler = logging.FileHandler(log_file)
+    # File handler (uses configured verbosity) with rotation to reduce unbounded log growth
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=25 * 1024 * 1024,  # 25 MB per file
+        backupCount=5,
+    )
     file_handler.setLevel(log_level)
     file_formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s',
@@ -327,6 +332,7 @@ def main():
                 'webp_method': config.webp_method_busy,
                 'max_animated_frames': config.max_animated_frames,
                 'conversion_timeout': config.conversion_timeout,
+                'skip_second_threshold': config.skip_second_threshold,
             }
         else:
             mode = 'normal'
@@ -336,6 +342,7 @@ def main():
                 'webp_method': config.webp_method,
                 'max_animated_frames': config.max_animated_frames,
                 'conversion_timeout': config.conversion_timeout,
+                'skip_second_threshold': config.skip_second_threshold,
             }
         
         if adaptive_state['last_mode'] != mode:
@@ -374,7 +381,8 @@ def main():
                     jpegxl_effort=conversion_settings['jpegxl_effort'],
                     webp_method=conversion_settings['webp_method'],
                     max_animated_frames=conversion_settings['max_animated_frames'],
-                    conversion_timeout=conversion_settings['conversion_timeout']
+                    conversion_timeout=conversion_settings['conversion_timeout'],
+                    skip_second_threshold=conversion_settings['skip_second_threshold']
                 )
                 result_queue.put((index, image_path, success, format_kept, original_size, final_size, None))
             except Exception as e:
@@ -548,7 +556,8 @@ def main():
                     jpegxl_effort=conversion_settings['jpegxl_effort'],
                     webp_method=conversion_settings['webp_method'],
                     max_animated_frames=conversion_settings['max_animated_frames'],
-                    conversion_timeout=conversion_settings['conversion_timeout']
+                    conversion_timeout=conversion_settings['conversion_timeout'],
+                    skip_second_threshold=conversion_settings['skip_second_threshold']
                 )
                 process_duration = time.time() - process_start
                 

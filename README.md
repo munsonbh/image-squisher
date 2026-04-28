@@ -185,13 +185,13 @@ python main.py /path/to/images --workers 4
 - **Automatic format detection**: Scans and reports all image formats found
 - **Smart compression**: Only keeps converted files if they're at least 5% smaller (configurable)
 - **Parallel processing**: Processes multiple images concurrently (configurable via config or --workers flag); throttle mid-batch with SIGUSR1/SIGUSR2 on Unix/macOS
-- **Parallel conversions**: Converts to JPEG XL and WebP simultaneously for each image
+- **Staged conversions**: Uses a file-type heuristic to try the most likely winning codec first, and skips the second pass when savings are already strong
 - **Configurable compression**: Compression settings fully configurable via config.json
 - **Skip optimized files**: Automatically skips files already in JXL or WebP format
 - **Progress tracking**: Real-time progress with file-by-file updates
 - **Hang detection**: Automatically detects if processing stalls (5+ minutes)
 - **Error notifications**: macOS notifications for errors and hangs (requires terminal-notifier)
-- **Detailed logging**: All activity logged to `image-squisher.log`
+- **Detailed logging**: Activity logged to `image-squisher.log` with automatic rotation
 
 ## Configuration
 
@@ -211,6 +211,7 @@ A default `config.json` file is created automatically when you first run the too
   "jpegxl_quality": 100,
   "jpegxl_effort": 9,
   "webp_method": 6,
+  "skip_second_threshold": 0.70,
   "conversion_timeout": 300,
   "max_animated_frames": 1000,
   "log_file": "image-squisher.log",
@@ -268,6 +269,12 @@ A default `config.json` file is created automatically when you first run the too
   - `6` = highest compression, slowest
   - Lower values are faster but produce larger files
 
+- **`skip_second_threshold`** (float, default: `0.70`)
+  - Controls staged conversion skip behavior
+  - If first codec output is less than or equal to this fraction of original size, second codec is skipped
+  - Range: `0.0` to `1.0`
+  - Lower values favor compression quality checks; higher values favor speed
+
 - **`conversion_timeout`** (integer, default: `300`)
   - Maximum time in seconds for a single image conversion
   - Prevents the tool from hanging on problematic images
@@ -322,7 +329,7 @@ A default `config.json` file is created automatically when you first run the too
 1. **Scans** the specified folder for image files (recursively by default)
 2. **For each image (processed in parallel):**
    - Skips files already in JXL or WebP format
-   - Converts to JPEG XL and WebP **simultaneously** (lossless, configurable compression) - if available
+   - Converts using a staged strategy (preferred codec first, optional second pass) - if available
    - Compares file sizes of original, JPEG XL, and WebP
    - **Only keeps converted file if it meets the minimum improvement threshold** (configurable, default 5%)
    - Deletes temporary files
@@ -332,7 +339,7 @@ A default `config.json` file is created automatically when you first run the too
 ### Performance Optimizations
 
 - **Parallel image processing**: Multiple images processed concurrently (configurable via `threads` in config or `--workers` flag)
-- **Parallel format conversion**: JPEG XL and WebP conversions run simultaneously for each image
+- **Staged format conversion**: Most likely winner is tried first; second codec is skipped when the first already gives strong size reduction
 - **Configurable compression settings**: Compression effort/quality fully configurable via config.json (defaults: effort 9 for JPEG XL, method 6 for WebP)
 - **Smart skipping**: Automatically skips files already in optimized formats
 

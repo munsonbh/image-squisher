@@ -155,7 +155,8 @@ def process_image(
     jpegxl_effort: Optional[int] = None,
     webp_method: Optional[int] = None,
     max_animated_frames: Optional[int] = None,
-    conversion_timeout: Optional[int] = None
+    conversion_timeout: Optional[int] = None,
+    skip_second_threshold: Optional[float] = None
 ) -> Tuple[bool, str, int, int]:
     """
     Process a single image: convert, compare, and keep smallest.
@@ -196,7 +197,8 @@ def process_image(
         jpegxl_effort=jpegxl_effort,
         webp_method=webp_method,
         max_animated_frames=max_animated_frames,
-        conversion_timeout=conversion_timeout
+        conversion_timeout=conversion_timeout,
+        skip_second_threshold=skip_second_threshold
     )
     
     try:

@@ -5,9 +5,8 @@ import logging
 import subprocess
 import shutil
 import platform
-import threading
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PIL import Image
 
 
@@ -286,7 +285,8 @@ def convert_image(
     jpegxl_effort: Optional[int] = None,
     webp_method: Optional[int] = None,
     max_animated_frames: Optional[int] = None,
-    conversion_timeout: Optional[int] = None
+    conversion_timeout: Optional[int] = None,
+    skip_second_threshold: Optional[float] = None
 ) -> Tuple[Optional[Path], Optional[Path], Optional[int], Optional[int]]:
     """
     Convert an image to both JPEG XL and WebP formats in parallel.
@@ -301,9 +301,9 @@ def convert_image(
         Paths and sizes will be None if conversion failed
     """
     logger = logging.getLogger('image-squisher')
-    
+
     base_name = image_path.stem
-    
+
     jxl_path = temp_dir / f"{base_name}.tmp.jxl"
     webp_path = temp_dir / f"{base_name}.tmp.webp"
     
@@ -314,6 +314,7 @@ def convert_image(
         or webp_method is None
         or max_animated_frames is None
         or conversion_timeout is None
+        or skip_second_threshold is None
     ):
         try:
             from config_loader import load_config
@@ -328,6 +329,8 @@ def convert_image(
                 max_animated_frames = config.max_animated_frames
             if conversion_timeout is None:
                 conversion_timeout = config.conversion_timeout
+            if skip_second_threshold is None:
+                skip_second_threshold = config.skip_second_threshold
         except Exception:
             if jpegxl_quality is None:
                 jpegxl_quality = 100
@@ -339,83 +342,80 @@ def convert_image(
                 max_animated_frames = 1000
             if conversion_timeout is None:
                 conversion_timeout = 300
+            if skip_second_threshold is None:
+                skip_second_threshold = 0.70
     
-    # Convert both formats in parallel using threads
-    jxl_result = [None]  # Use list to allow modification from nested function
-    webp_result = [None]
-    jxl_error = [None]
-    webp_error = [None]
-    
-    def convert_jxl():
-        try:
-            jxl_result[0] = convert_to_jpegxl(
-                image_path,
-                jxl_path,
-                quality=jpegxl_quality,
-                effort=jpegxl_effort,
-                timeout=conversion_timeout
-            )
-            if jxl_result[0] is None:
-                logger.info(f"JXL conversion failed for {image_path.name}")
-            else:
-                logger.info(f"JXL conversion succeeded for {image_path.name}: {jxl_result[0]} bytes")
-        except Exception as e:
-            jxl_error[0] = str(e)
-            logger.warning(f"JXL conversion exception for {image_path.name}: {e}", exc_info=True)
-    
-    def convert_webp():
-        try:
-            webp_result[0] = convert_to_webp(
-                image_path,
-                webp_path,
-                method=webp_method,
-                max_frames=max_animated_frames
-            )
-            if webp_result[0] is None:
-                logger.info(f"WebP conversion failed for {image_path.name}")
-            else:
-                logger.info(f"WebP conversion succeeded for {image_path.name}: {webp_result[0]} bytes")
-        except Exception as e:
-            webp_error[0] = str(e)
-            logger.warning(f"WebP conversion exception for {image_path.name}: {e}", exc_info=True)
-    
-    # Start both conversions in parallel
-    jxl_thread = threading.Thread(target=convert_jxl)
-    webp_thread = threading.Thread(target=convert_webp)
-    
-    logger.info(f"Starting both JXL and WebP conversions in parallel for {image_path.name}")
-    jxl_thread.start()
-    webp_thread.start()
-    
-    # Wait for JXL to complete first (it's usually faster)
-    jxl_thread.join()
-    jxl_size = jxl_result[0]
-    
-    # Early exit optimization: if JXL is already significantly smaller than original,
-    # we can skip waiting for WebP (but still let it finish in background)
-    skip_webp_wait = False
-    if original_size and jxl_size and jxl_size < original_size * 0.7:  # JXL is 30%+ smaller
-        # JXL is already very good, but still wait for WebP to compare
-        # (WebP might be even smaller)
-        pass
-    
-    # Wait for WebP to complete
-    webp_thread.join()
-    webp_size = webp_result[0]
+    jxl_size: Optional[int] = None
+    webp_size: Optional[int] = None
+    jxl_error: Optional[str] = None
+    webp_error: Optional[str] = None
+
+    # File-type heuristic: PNG/GIF-like images often favor WebP; JPEG/TIFF-like often favor JXL.
+    prefer_webp_exts = {'.png', '.gif', '.bmp'}
+    suffix = image_path.suffix.lower()
+    run_order: List[str] = ['webp', 'jxl'] if suffix in prefer_webp_exts else ['jxl', 'webp']
+
+    # If the first conversion is already much smaller than original, skip the second pass.
+    # This intentionally trades a tiny amount of possible savings for substantially less CPU/log I/O.
+    if skip_second_threshold is None:
+        skip_second_threshold = 0.70
+
+    for idx, codec in enumerate(run_order):
+        is_second = idx == 1
+        if is_second:
+            first_size = webp_size if run_order[0] == 'webp' else jxl_size
+            if original_size and first_size and first_size <= int(original_size * skip_second_threshold):
+                logger.debug(
+                    f"Skipping second codec for {image_path.name}: "
+                    f"first result already <= {int(skip_second_threshold * 100)}% of original"
+                )
+                break
+
+        if codec == 'jxl':
+            try:
+                jxl_size = convert_to_jpegxl(
+                    image_path,
+                    jxl_path,
+                    quality=jpegxl_quality,
+                    effort=jpegxl_effort,
+                    timeout=conversion_timeout
+                )
+                if jxl_size is None:
+                    logger.debug(f"JXL conversion failed for {image_path.name}")
+                else:
+                    logger.debug(f"JXL conversion succeeded for {image_path.name}: {jxl_size} bytes")
+            except Exception as e:
+                jxl_error = str(e)
+                logger.warning(f"JXL conversion exception for {image_path.name}: {e}", exc_info=True)
+        else:
+            try:
+                webp_size = convert_to_webp(
+                    image_path,
+                    webp_path,
+                    method=webp_method,
+                    max_frames=max_animated_frames
+                )
+                if webp_size is None:
+                    logger.debug(f"WebP conversion failed for {image_path.name}")
+                else:
+                    logger.debug(f"WebP conversion succeeded for {image_path.name}: {webp_size} bytes")
+            except Exception as e:
+                webp_error = str(e)
+                logger.warning(f"WebP conversion exception for {image_path.name}: {e}", exc_info=True)
     
     # Log results for debugging
     if jxl_size is None and webp_size is None:
         logger.warning(f"Both JXL and WebP conversions failed for {image_path.name}")
-        if jxl_error[0]:
-            logger.warning(f"JXL error: {jxl_error[0]}")
-        if webp_error[0]:
-            logger.warning(f"WebP error: {webp_error[0]}")
+        if jxl_error:
+            logger.warning(f"JXL error: {jxl_error}")
+        if webp_error:
+            logger.warning(f"WebP error: {webp_error}")
     elif jxl_size is None:
-        logger.info(f"JXL conversion failed, WebP succeeded ({webp_size} bytes) for {image_path.name}")
+        logger.debug(f"JXL conversion failed, WebP succeeded ({webp_size} bytes) for {image_path.name}")
     elif webp_size is None:
-        logger.info(f"WebP conversion failed, JXL succeeded ({jxl_size} bytes) for {image_path.name}")
+        logger.debug(f"WebP conversion failed, JXL succeeded ({jxl_size} bytes) for {image_path.name}")
     else:
-        logger.info(f"Both conversions succeeded for {image_path.name}: JXL={jxl_size} bytes, WebP={webp_size} bytes")
+        logger.debug(f"Both conversions succeeded for {image_path.name}: JXL={jxl_size} bytes, WebP={webp_size} bytes")
     
     # Clean up if conversion failed
     if jxl_size is None and jxl_path.exists():

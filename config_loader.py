@@ -28,6 +28,7 @@ class Config:
         self.webp_method: int = config_dict.get('webp_method', 6)
         self.conversion_timeout: int = config_dict.get('conversion_timeout', 300)  # seconds
         self.max_animated_frames: int = config_dict.get('max_animated_frames', 1000)
+        self.skip_second_threshold: float = config_dict.get('skip_second_threshold', 0.70)
         
         # Adaptive conversion settings (load-aware effort/method tuning)
         self.adaptive_effort_enabled: bool = config_dict.get('adaptive_effort_enabled', True)
@@ -61,6 +62,8 @@ class Config:
             raise ValueError("conversion_timeout must be >= 1")
         if self.max_animated_frames < 1:
             raise ValueError("max_animated_frames must be >= 1")
+        if not (0.0 <= self.skip_second_threshold <= 1.0):
+            raise ValueError("skip_second_threshold must be between 0.0 and 1.0")
         if self.busy_load_threshold < 0:
             raise ValueError("busy_load_threshold must be >= 0")
         if not (0 <= self.jpegxl_effort_busy <= 9):
@@ -127,6 +130,7 @@ def create_default_config(config_path: Path) -> None:
         "webp_method": 6,
         "conversion_timeout": 300,
         "max_animated_frames": 1000,
+        "skip_second_threshold": 0.70,
         "adaptive_effort_enabled": True,
         "busy_load_threshold": 0.7,
         "jpegxl_effort_busy": 6,
