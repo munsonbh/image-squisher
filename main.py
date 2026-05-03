@@ -30,6 +30,37 @@ def format_bytes(bytes: int) -> str:
     return f"{bytes:.2f} TB"
 
 
+def format_progress_line(done: int, total: int, bar_width: int = 28) -> str:
+    """Single-line progress: bar, count, and percentage (for terminal updates)."""
+    if total <= 0:
+        return "Progress: —"
+    pct = 100.0 * done / total
+    filled = min(bar_width, round(bar_width * done / total))
+    bar = "#" * filled + "-" * (bar_width - filled)
+    return f"[{bar}] {done}/{total} ({pct:.1f}%)"
+
+
+def report_batch_progress(done: int, total: int, *, is_tty: bool, last_bucket: list) -> None:
+    """
+    Update progress on stdout. TTY: rewrite one line with \\r; non-TTY: at most ~20 lines per batch.
+    last_bucket: single-element list holding last printed twentieth bucket (0..20) for non-TTY.
+    """
+    if total <= 0:
+        return
+    line = format_progress_line(done, total)
+    if is_tty:
+        # Pad to clear remnants from a longer previous line
+        pad = max(0, 96 - len(line))
+        sys.stdout.write("\r" + line + (" " * pad))
+        sys.stdout.flush()
+        return
+    # Non-TTY: print when crossing ~5% steps (or first/last file)
+    bucket = (done * 20) // total
+    if done == total or done == 1 or bucket > last_bucket[0]:
+        last_bucket[0] = bucket
+        print(line, flush=True)
+
+
 def check_terminal_notifier() -> Optional[str]:
     """Check if terminal-notifier is available and return its path (macOS only)."""
     system = platform.system()
@@ -398,6 +429,8 @@ def main():
                 image_queue.task_done()
     
     if num_workers > 1:
+        progress_tty = sys.stdout.isatty()
+        progress_bucket = [0]
         # Use threading for parallel processing
         image_queue = Queue()
         result_queue = Queue()
@@ -442,6 +475,12 @@ def main():
                 index, image_path, success, format_kept, original_size, final_size, error_msg = result_queue.get(timeout=timeout)
                 results_dict[index] = (image_path, success, format_kept, original_size, final_size, error_msg)
                 completed_count[0] += 1
+                report_batch_progress(
+                    len(results_dict),
+                    len(image_files),
+                    is_tty=progress_tty,
+                    last_bucket=progress_bucket,
+                )
                 last_progress_time = time.time()
                 last_hang_check = time.time()
             except Empty:
@@ -479,6 +518,9 @@ def main():
                 
                 # Continue waiting for results
                 continue
+        
+        if progress_tty:
+            print()
         
         # Stop workers
         for _ in range(num_workers):
